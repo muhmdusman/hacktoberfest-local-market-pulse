@@ -16,7 +16,7 @@ class ScanCreate(BaseModel):
     areas: list[ShortText] = Field(default_factory=list, max_length=12, examples=[["F-7", "G-11"]])
     competitors: list[ShortText] = Field(default_factory=list, max_length=10)
     sources: list[Source] = Field(default_factory=lambda: ["web", "reddit"], min_length=1)
-    max_results: int = Field(20, ge=1, le=50)
+    max_results: int = Field(20, ge=1, le=200)
 
     @field_validator("sources")
     @classmethod
