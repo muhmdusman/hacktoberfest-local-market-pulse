@@ -1,0 +1,25 @@
+# Local development services.
+# Run from the repo root:
+#   docker compose --env-file .env.local -f docker/docker-compose.local.yml up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hacktober_postgres
+    restart: unless-stopped
+    # Injects POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB into the container.
+    env_file:
+      - ../.env.local
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ defers expansion to the container shell, where env_file vars exist.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    name: hacktober_postgres_data
