@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/app/core/config.py -> parents[3] is the repository root
@@ -22,9 +23,19 @@ class Settings(BaseSettings):
     app_name: str = "Hacktober API"
     app_env: str = "local"
     api_v1_prefix: str = "/api/v1"
+    log_level: str = "INFO"
 
     database_url: str
     db_echo: bool = False
+
+    # ---- LLM (open-weight, <= 8B, enforced by app.llm.registry) ----
+    groq_api_key: SecretStr | None = None
+    llm_model: str = "allam-2-7b"
+    llm_temperature: float = 0.0
+    llm_max_tokens: int = 512
+    llm_timeout_s: float = 30.0
+    llm_max_retries: int = 3  # client-side exponential backoff on 429 / 5xx
+    llm_max_concurrency: int = 4
 
 
 @lru_cache

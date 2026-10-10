@@ -24,6 +24,16 @@ async def _dispose_engine() -> AsyncIterator[None]:
 
 
 @pytest.fixture
+def fake_search(monkeypatch):
+    """Replace the ddgs network call with canned hits."""
+    from app.tools import web_search as web_search_module
+    from tests.fakes import fake_ddgs
+
+    monkeypatch.setattr(web_search_module, "_ddgs_text", fake_ddgs)
+    return fake_ddgs
+
+
+@pytest.fixture
 async def db_session() -> AsyncIterator[AsyncSession]:
     async with AsyncSessionLocal() as session:
         yield session
