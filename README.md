@@ -31,14 +31,14 @@ Local Market Pulse is an open-source **market-intelligence agent** for small and
 
 All reasoning runs on **open-weight models of 8B parameters or fewer**, orchestrated by a **LangGraph** agent and served through a **LiteLLM** gateway.
 
-The insights are a foundation, not an endpoint. They feed our **SEO tool**, and they support business analysis, product and service improvements, and decisions about what to build next.
+The insights are a foundation for many decisions: understanding the market, fixing what customers dislike, building what they're missing, positioning against competitors, and planning marketing. They come out as structured JSON, so dashboards, analytics tools and other AI agents can all use them.
 
 | | |
 |---|---|
 | **Domain** | 05 · Business & Productivity (with a Community & Social Good angle) |
 | **Approach** | Model harness (LangGraph agent with original routing, validation and escalation logic) + Agent Skill |
 | **Core model** | Meta Llama 3.1 8B Instruct (`llama-3.1-8b-instant`) via Groq |
-| **Sources** | Reddit and the open web. More platforms are on the roadmap |
+| **Sources** | Reddit (rdt-cli, OpenCLI) and the open web (Exa search, Jina Reader). Sources are pluggable, so more platforms can be added later |
 | **License** | [MIT](LICENSE) |
 
 ## Contents
@@ -94,11 +94,12 @@ Every insight links back to the source posts it came from, so it can be checked.
 
 | Use | How Local Market Pulse helps |
 |---|---|
-| **SEO and content** | Local keywords, real customer questions and content topics go into our SEO tool for keyword targeting, FAQ pages and content plans |
 | **Business analysis** | Sentiment by area, recurring themes and competitor benchmarks give a factual view of the local market |
 | **Product and service improvement** | Recurring complaints show what to fix first. Praised practices show what to keep |
 | **New products and services** | Unmet needs, weighted by how often they come up, point to openings worth building |
 | **Competitive strategy** | Competitor strengths and weaknesses show where to differentiate |
+| **Marketing, content and SEO** | Local keywords, real questions and recurring topics guide messaging, content plans, FAQ pages and search optimisation |
+| **AI agents and automation** | The report JSON can be passed to other agents and tools, such as an SEO tool, a CRM or a planning assistant |
 | **Customer communication** | Real questions become FAQs, help content and community answers |
 
 ## AI component
@@ -122,21 +123,29 @@ Every insight links back to the source posts it came from, so it can be checked.
 
 ```mermaid
 flowchart LR
-    subgraph Clients
+    subgraph Consumers["Who uses the insights"]
         UI[Next.js dashboard]
-        AGT[External AI agent<br/>via Agent Skill]
-        SEO[SEO tool]
+        AGT[AI agents<br/>via Agent Skill or API]
+        DOWN[Downstream tools<br/>analytics, SEO, BI]
     end
 
     subgraph Backend["FastAPI backend"]
         API[REST API /api/v1]
+        GUARD[Run limits<br/>queries, records, calls, tokens]
         subgraph Agent["LangGraph market agent"]
             PLAN[Plan queries]
             COLL[Collect]
-            ANA[Analyze]
-            SYN[Synthesize insights]
+            EXT[Extract per post]
+            AGG[Aggregate<br/>Python, no LLM]
+            SYN[Synthesize report]
         end
-        TOOLS[LangChain tools<br/>Reddit search, web search, page reader]
+    end
+
+    subgraph Sources["Source tools, pluggable"]
+        RED[Reddit<br/>OpenCLI, rdt-cli]
+        SRCH[Web search<br/>Exa]
+        READ[Page reader<br/>Jina Reader]
+        MORE[More platforms<br/>added later]
     end
 
     subgraph Models["Open-weight models, max 8B"]
@@ -146,65 +155,122 @@ flowchart LR
     end
 
     DB[(PostgreSQL)]
-    NET[(Reddit and the open web)]
 
-    UI --> API
-    AGT --> API
-    API --> PLAN --> COLL --> ANA --> SYN
-    COLL --> TOOLS --> NET
+    UI <--> API
+    AGT <--> API
+    API --> DOWN
+    API --> GUARD --> PLAN --> COLL --> EXT --> AGG --> SYN
+    COLL --> RED
+    COLL --> SRCH
+    COLL --> READ
+    COLL -.-> MORE
     PLAN --> GW
-    ANA --> GW
+    EXT --> GW
     SYN --> GW
     GW --> GROQ
-    GW --> OLL
+    GW -.-> OLL
     SYN --> DB
     API <--> DB
-    API --> SEO
 ```
+
+### Data collection
+
+Each platform is a separate tool behind the same interface, and the first backend that works is used. Adding a platform means adding one more tool. The pipeline doesn't change.
+
+```mermaid
+flowchart LR
+    Q[Queries from the planner] --> RD{Reddit backend}
+    RD -- logged-in Chrome session --> OC[OpenCLI<br/>reddit search and read]
+    RD -- saved rdt session --> RDT[rdt-cli<br/>rdt search, rdt sub, rdt read]
+    RD -- no session --> EXR[Exa search<br/>site:reddit.com]
+    RD -- offline --> SNAP[(Cached snapshot)]
+    Q --> EXW[Exa web search] --> URLS[Result URLs<br/>plus user-supplied URLs]
+    URLS --> PUB{Public URL?}
+    PUB -- no --> SKIP[Skip]
+    PUB -- yes --> JR[Jina Reader<br/>page to clean text]
+    JR --> CH[Chunks of about 1,500 characters]
+    OC --> REC[(Records: text, source, date, area)]
+    RDT --> REC
+    EXR --> REC
+    SNAP --> REC
+    CH --> REC
+    NEW[Future platform tool] -.-> REC
+```
+
+The model never sees credentials. Tools run on the backend and return only text. Reddit sessions are created by the user, never by the agent.
 
 ### Agent graph
 
-The LangGraph state graph. The routing, validation and escalation logic is the team's original harness work.
+The LangGraph state graph. The routing, validation, escalation and evidence rules are the team's original harness work.
 
 ```mermaid
 flowchart TD
-    S0([Input: business, region, competitors]) --> PQ[plan_queries<br/>LLM expands local search queries]
+    S0([Input: business, region, competitors]) --> PQ[plan_queries<br/>LLM writes local search queries]
     PQ --> C1[search_reddit]
-    PQ --> C2[search_web]
+    PQ --> C2[search_web and read_pages]
     C1 --> N[normalize<br/>dedupe, PII scrub, language detection]
     C2 --> N
     N --> R{route}
     R -- off-topic --> DROP[discard]
     R -- plain English --> XS[extract: small tier]
     R -- Urdu, Roman Urdu, code-mixed or long --> XL[extract: large tier]
-    XS --> V{validate schema<br/>and confidence}
+    XS --> V{valid schema<br/>and confident?}
     XL --> V
-    V -- invalid, retries left --> REP[repair with validation error]
+    V -- invalid, repairs left --> REP[repair with validation error]
     REP --> V
     V -- low confidence on small tier --> XL
-    V -- failed after retries --> LOG[log failure]
+    V -- failed after repairs --> LOG[log failure]
     V -- valid --> ACC[accept insight]
-    ACC --> AGG[aggregate<br/>trends, gaps, competitor profiles]
-    AGG --> SYN[synthesize<br/>pain points, unmet needs, follow and avoid, keywords]
-    SYN --> S9([Insight report + JSON])
+    ACC --> AGG[aggregate in Python<br/>counts, lift, gap scores, competitor profiles]
+    AGG --> EV{at least 2<br/>supporting posts?}
+    EV -- no --> CUT[drop finding]
+    EV -- yes --> SYN[synthesize<br/>LLM gets stats and top quotes]
+    SYN --> VS{valid report schema?}
+    VS -- no, repairs left --> SYN
+    VS -- yes --> S9([Report JSON with citations])
+    BUD[[Run budget: calls, tokens, records, time]] -.-> XS
+    BUD -.-> XL
+    BUD -.-> SYN
 ```
+
+The final report is never written from raw posts. The model receives aggregated numbers plus the strongest quotes for each finding, and it must return JSON that matches the report schema.
+
+### Run limits
+
+| Limit | Default |
+|---|---|
+| Model size | Open-weight, ≤ 8B (allowlist) |
+| Search queries | 8 per run |
+| Reddit | 20 posts per query, 20 comments per post |
+| Web pages | 10 per run, about 1,500 characters per chunk, 5 MB per page |
+| Records analysed | 200 per run, last 90 days |
+| Per-call output | About 400 tokens for extraction, 1,500 for synthesis |
+| Recovery | 2 repairs, 1 escalation, 3 votes on borderline cases only |
+| Run budget | About 400 model calls and a total token budget. Partial results are returned when it's reached |
+| Graph | LangGraph recursion limit of 30 |
+| Concurrency | 4 parallel calls, 60 s timeout, retries with backoff |
+| Report | Top 10 items per section, each backed by at least 2 posts |
 
 ### Data flow
 
 ```mermaid
 flowchart LR
     INP[/Business, region, competitors/] --> P1((Plan and collect))
-    NET[(Reddit + open web)] --> P1
+    NET[(Reddit and the open web)] --> P1
     P1 --> P2((Normalize and scrub PII))
     P2 --> D1[(Source records)]
     D1 --> P3((Extract insights))
     P3 <--> GW[LiteLLM gateway to open-weight model]
-    P3 --> D2[(Insights + traces)]
-    D2 --> P4((Aggregate trends and gaps))
-    P4 --> P5((Synthesize findings))
+    P3 --> D2[(Insights and traces)]
+    D2 --> P4((Aggregate in Python))
+    P4 --> D3[(Trends, gaps, competitor profiles)]
+    D3 --> P5((Synthesize report))
+    P5 <--> GW
     P5 --> O1[/Dashboard/]
-    P5 --> O2[/JSON for agents and the SEO tool/]
-    P5 --> O3[/Business and product decisions/]
+    P5 --> O2[/Report JSON for AI agents/]
+    P5 --> O3[/Business analysis and strategy/]
+    P5 --> O4[/Product and service decisions/]
+    P5 --> O5[/Marketing, content and SEO/]
 ```
 
 ### Request sequence
@@ -214,33 +280,34 @@ sequenceDiagram
     actor User as SME or AI agent
     participant API as FastAPI
     participant G as LangGraph agent
-    participant T as LangChain tools
+    participant T as Source tools
     participant L as LiteLLM gateway
     participant M as Open-weight model (max 8B)
     participant DB as PostgreSQL
 
     User->>API: POST /api/v1/runs (business, region, competitors)
-    API->>DB: Create run
+    API->>DB: Create run with limits
     API-->>User: 202 Accepted, run_id
     API->>G: Invoke graph in background
     G->>L: Plan local search queries
-    L->>M: Completion request
+    L->>M: Completion
     M-->>G: Queries
-    G->>T: Search Reddit and the web, read pages
-    T-->>G: Posts, comments, pages
-    loop Each record
-        G->>L: Extract structured insight
-        L->>M: Completion request
+    G->>T: rdt-cli or OpenCLI, Exa search, Jina Reader
+    T-->>G: Posts, comments, page text
+    G->>G: Normalize, scrub PII, detect language
+    loop Each record, within the run budget
+        G->>L: Extract insight as JSON
+        L->>M: Completion
         M-->>G: JSON
         G->>G: Validate, repair or escalate
     end
-    G->>G: Aggregate trends and gaps
-    G->>L: Synthesize findings
-    L->>M: Completion request
-    M-->>G: Summary
-    G->>DB: Store insights and report
+    G->>G: Aggregate counts, trends and gaps in Python
+    G->>L: Synthesize report from stats and top quotes
+    L->>M: Completion
+    M-->>G: Report JSON
+    G->>DB: Store insights, traces and report
     User->>API: GET /api/v1/runs/{id}/results
-    API-->>User: Insights JSON
+    API-->>User: Report JSON with citations
 ```
 
 ### Data model (planned)
@@ -345,7 +412,7 @@ The hackathon's model-harness rules ask teams to say exactly what they implement
 | Backend | Python 3.12 · FastAPI 0.143 · Pydantic Settings · SQLAlchemy 2.1 (async) · asyncpg · Uvicorn |
 | Database | PostgreSQL 16 (Docker) |
 | Frontend | Next.js 16 · React 19 · Tailwind CSS 4 · TypeScript |
-| Data access | Reddit search and read · web search · Jina Reader for public pages |
+| Data access | rdt-cli and OpenCLI (Reddit) · Exa (web search) · Jina Reader (page text) · pluggable for more platforms |
 | Testing | pytest · pytest-asyncio · httpx · live curl checks |
 | Tooling | uv · Docker Compose · npm |
 
@@ -445,7 +512,7 @@ All routes are served under `API_V1_PREFIX` (default `/api/v1`). Interactive doc
 | `GET` | `/api/v1/runs/{id}/results` | Pain points, unmet needs, competitors, follow and avoid, keywords, questions, trends | Planned |
 | `GET` | `/api/v1/runs/{id}/posts` | Analysed source posts, with filters | Planned |
 | `GET` | `/api/v1/runs/{id}/posts/{record_id}` | One post, its insight and the agent's trace | Planned |
-| `GET` | `/api/v1/runs/{id}/export` | Full results as JSON, for agents and the SEO tool | Planned |
+| `GET` | `/api/v1/runs/{id}/export` | Full report as JSON, for AI agents and downstream tools | Planned |
 
 Request and response shapes: [docs/UI_AND_API.md](docs/UI_AND_API.md).
 
@@ -493,7 +560,7 @@ Evaluation results (baseline vs small-only vs large-only vs routed) will be adde
 
 ## Limitations and responsible use
 
-- **Two sources for now.** Only Reddit and the public web. More platforms are on the roadmap.
+- **Two sources for now.** Reddit and the public web. Each source is a separate tool, so more platforms can be added later without changing the pipeline.
 - **Small samples are noisy.** With little data, trend scores are signals, not proof.
 - **Reddit access** depends on a session the user already has. The system never automates logins or reads browser cookies.
 - **Privacy.** Usernames are hashed (SHA-256), and emails and phone numbers are removed before any text reaches a model.
@@ -503,8 +570,8 @@ Evaluation results (baseline vs small-only vs large-only vs routed) will be adde
 
 ## Roadmap
 
-- More sources: review platforms, Facebook groups, YouTube comments, X
-- Direct integration with our SEO tool (Search Console analysis to actionable issues)
+- More platforms as plug-in source tools: review sites, Facebook groups, YouTube comments, X, local forums
+- Integrations with downstream tools such as SEO, analytics and CRM systems
 - Scheduled scans with change alerts ("complaints about delivery doubled this month")
 - Multi-region comparison
 - Larger hand-labelled evaluation set for Urdu and Roman Urdu
@@ -543,7 +610,6 @@ You may use, copy, modify and distribute this project as long as the license and
 - [Groq](https://groq.com/) and [Ollama](https://ollama.com/)
 - [FastAPI](https://fastapi.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/), [PostgreSQL](https://www.postgresql.org/), [Next.js](https://nextjs.org/), [Tailwind CSS](https://tailwindcss.com/)
 - [rdt-cli](https://github.com/public-clis/rdt-cli), [OpenCLI](https://github.com/jackwener/opencli), [Exa](https://exa.ai/) and [Jina Reader](https://github.com/jina-ai/reader)
-- [Agent-Reach](https://github.com/Panniantong/Agent-Reach) (MIT), reference for multi-platform data access
 - [Agent Skills specification](https://agentskills.io/specification)
 - Hacktoberfest Islamabad 2026, organised by CNCF Islamabad and powered by MLH
 
