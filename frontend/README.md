@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Local Market Pulse dashboard
 
-## Getting Started
+A small Next.js dashboard for starting a local-market scan and reviewing customer pain points, competitors, keywords, recommendations, and supporting evidence. It uses local synthetic data by default, so the demo works without the backend.
 
-First, run the development server:
+## Run locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open <http://localhost:3000> and click **Analyze market**. The mock run moves through collection, analysis, trend detection, and report generation before showing the dashboard.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Mock and live modes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Mocks are enabled by default. You can force them for any visit with:
 
-## Learn More
+```text
+http://localhost:3000/?mock=1
+```
 
-To learn more about Next.js, take a look at the following resources:
+Copy the example environment file when you want explicit local settings:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+cp .env.example .env.local
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Variable | Default | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | `http://127.0.0.1:8000/api/v1` | Backend API prefix |
+| `NEXT_PUBLIC_USE_MOCKS` | `true` | Use local synthetic payloads instead of HTTP |
 
-## Deploy on Vercel
+To connect the backend, set `NEXT_PUBLIC_USE_MOCKS=false`, update the base URL if needed, and restart `npm run dev`. Public Next.js variables are embedded when the app starts/builds.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Expected API endpoints
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The adapter in `lib/api.ts` is the only frontend integration point. It expects JSON from:
+
+- `GET /options`
+- `GET /models`
+- `GET /sources/status`
+- `POST /runs`
+- `GET /runs/{id}`
+- `GET /runs/{id}/results`
+
+Each path is appended to `NEXT_PUBLIC_API_BASE_URL`, so the default full prefix is `/api/v1`. Request and response interfaces are in `lib/types.ts`; local demo payloads are in `lib/mock-data.ts`.
+
+## Checks
+
+```bash
+npm run lint
+npm run build
+```
